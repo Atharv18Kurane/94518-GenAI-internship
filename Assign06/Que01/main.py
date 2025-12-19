@@ -2,10 +2,16 @@ import streamlit as st
 from dotenv import load_dotenv
 import os
 import requests
-import json
 
 load_dotenv()
 st.title("My Chatbot")
+
+# ================== SESSION STATE ==================
+if "cloud_history" not in st.session_state:
+    st.session_state.cloud_history = []
+
+if "local_history" not in st.session_state:
+    st.session_state.local_history = []
 
 # ================== GROQ CONFIG ==================
 api_key = os.getenv("GROQ_API_KEY")
@@ -19,74 +25,97 @@ groq_headers = {
 with st.sidebar:
     st.header("Menu")
     mode = st.selectbox("Select Menu", ["Cloud Based API", "Local API"])
+    if st.button("Clear Chat"):
+        if mode == "Cloud Based API":
+            st.session_state.cloud_history = []
+        else:
+            st.session_state.local_history = []
+        st.rerun()
 
-# ================== GROQ ==================
+# ================== CLOUD (GROQ) ==================
 if mode == "Cloud Based API":
+    history = st.session_state.cloud_history
+
+    # Show previous messages
+    for msg in history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
     user_input = st.chat_input("Ask anything")
 
     if user_input:
+        # Store user message
+        history.append({"role": "user", "content": user_input})
+
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
         req_data = {
             "model": "llama-3.3-70b-versatile",
-            "messages": [
-                {"role": "user", "content": user_input}
-            ]
+            "messages": history
         }
 
-        response = requests.post(
-            groq_url,
-            headers=groq_headers,
-            json=req_data
-        )
+        response = requests.post(groq_url, headers=groq_headers, json=req_data)
 
-        # 1️⃣ HTTP-level check
         if response.status_code != 200:
             st.error(f"HTTP Error {response.status_code}")
             st.code(response.text)
         else:
             res = response.json()
-
-            # 2️⃣ API-level check
             if "choices" not in res:
                 st.error("Groq API Error")
                 st.json(res)
             else:
-                st.success(res["choices"][0]["message"]["content"])
+                reply = res["choices"][0]["message"]["content"]
+                history.append({"role": "assistant", "content": reply})
 
-# ================== LM STUDIO ==================
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
+
+# ================== LOCAL (LM STUDIO) ==================
 if mode == "Local API":
-    lm_url = "http://127.0.0.1:1234/v1/chat/completions"
+    history = st.session_state.local_history
 
+    # Show previous messages
+    for msg in history:
+        if msg["role"]=="user":
+            with st.chat_message("user"):
+                st.write(msg["content"])
+        else:
+            st.markdown(msg["content"])
+
+    lm_url = "http://127.0.0.1:1234/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": "Bearer local",
         "Content-Type": "application/json"
     }
 
     user_input = st.chat_input("Ask anything")
 
     if user_input:
+        history.append({"role": "user", "content": user_input})
+
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
         req_data = {
             "model": "meta-llama-3.1-8b-instruct",
-            "messages": [
-                {"role": "user", "content": user_input}
-            ]
+            "messages": history
         }
 
-        response = requests.post(
-            lm_url,
-            headers=headers,
-            json=req_data
-        )
+        response = requests.post(lm_url, headers=headers, json=req_data)
 
-        # 1️⃣ HTTP-level check
         if response.status_code != 200:
             st.error(f"HTTP Error {response.status_code}")
             st.code(response.text)
         else:
             res = response.json()
-
-            # 2️⃣ API-level check
             if "choices" not in res:
                 st.error("LM Studio API Error")
                 st.json(res)
             else:
-                st.success(res["choices"][0]["message"]["content"])
+                reply = res["choices"][0]["message"]["content"]
+                history.append({"role": "assistant", "content": reply})
+
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
